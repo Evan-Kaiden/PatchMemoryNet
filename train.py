@@ -5,7 +5,6 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
 from tqdm import tqdm
-
 from losses import SupervisedContrastiveLoss
 
 contrastive_loss = SupervisedContrastiveLoss()
@@ -26,11 +25,10 @@ def train_one_epoch(epoch : int, model : nn.Module, trainloader : DataLoader, op
 
             patch_embeds, B, Tq = model.encode_patches(images)
             patch_embeds = F.normalize(patch_embeds, dim=1)
-            patch_labels = targets.repeat_interleave(Tq)
 
-            contrast_loss = contrastive_loss(patch_embeds, patch_labels)
+            contrast_loss = contrastive_loss(patch_embeds, targets)
 
-            loss = ce_loss + 0.1 * contrast_loss
+            loss = ce_loss  + 0.1 * contrast_loss
             loss.backward()
             optimizer.step()
 
