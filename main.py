@@ -14,7 +14,12 @@ def main():
     def extractor(img):
         return extract_patches(img, kernel_size=18, stride=3)
 
-    device = "mps"
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.mps.is_available():
+        device = "mps"
+
     m = Matcher(10, extractor).to(device)
     opt = torch.optim.Adam(m.parameters())
     criterion = torch.nn.CrossEntropyLoss()
