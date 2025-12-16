@@ -5,7 +5,7 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
 from tqdm import tqdm
-from losses import SupervisedContrastiveLoss
+from utils import SupervisedContrastiveLoss
 
 contrastive_loss = SupervisedContrastiveLoss()
 
