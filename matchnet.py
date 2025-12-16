@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torchvision.models import resnet18
-
+from utils import gumbel_topk_st
 
 
 class PatchEncoder(nn.Module):
@@ -25,12 +25,20 @@ class PatchEncoder(nn.Module):
         
         
 class Matcher(nn.Module):
-    def __init__(self, num_classes, extractor, embed_dim=256, temperature=0.1):
+    def __init__(self, num_classes, extractor, k=8, tau_gumbel=1.0, embed_dim=256, temperature=0.1):
         super().__init__()
         self.num_classes = num_classes
         self.extractor = extractor
         self.encoder = PatchEncoder(embed_dim)
         self.temperature = temperature
+
+        self.k = k
+        self.tau_gumbel = tau_gumbel
+        self.patch_scorer = nn.Sequential(
+            nn.Linear(embed_dim, 128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, 1)
+        )
         
     def encode_patches(self, x):
         patches = self.extractor(x)
@@ -40,33 +48,40 @@ class Matcher(nn.Module):
         return patch_embeds, B, Tq
 
     def logits_from_batch_memory(self, x, y):
-
         patch_embeds, B, Tq = self.encode_patches(x)
         N = B * Tq
 
+        patch_embeds_bt = patch_embeds.view(B, Tq, -1)
+        sel_logits = self.patch_scorer(patch_embeds_bt).squeeze(-1)
+
+        K = min(self.k, Tq)
+        if self.training:
+            w, idx = gumbel_topk_st(sel_logits, k=K, tau=self.tau_gumbel)
+        else:
+            idx = sel_logits.topk(K, dim=-1).indices
+            w = torch.zeros_like(sel_logits).scatter_(1, idx, 1.0)
+
         y_patches = y.repeat_interleave(Tq)
 
-        sim = patch_embeds @ patch_embeds.t() / self.temperature
-
+        sim = (patch_embeds @ patch_embeds.t()) / self.temperature
         sim = sim - torch.eye(N, device=sim.device) * 1e9
+
         cls_one_hot = F.one_hot(y_patches, num_classes=self.num_classes).float()
-        sim_per_class = sim @ cls_one_hot   
+        sim_per_class = sim @ cls_one_hot                         # (N, C)
 
-        logits = sim_per_class
-        targets = y_patches
+        w_flat = w.reshape(N)                                     # (N,)
+        logits = sim_per_class * w_flat.unsqueeze(1)              # (N, C)
 
+        targets = y_patches                                       # (N,)
         return logits, targets
 
     def forward(self, x, y=None):
         if y is None:
             raise ValueError("For training this Matcher, call forward with x, y.")
-        logits, targets = self.logits_from_batch_memory(x, y)
-        return logits, targets
+        return self.logits_from_batch_memory(x, y)
 
-    
     @torch.no_grad()
     def predict(self, x, memory, cls):
-
         img_patches = self.extractor(x)
         mem_patches = self.extractor(memory)
 
@@ -79,7 +94,14 @@ class Matcher(nn.Module):
         img_embeds = self.encoder(img_patches)
         mem_embeds = self.encoder(mem_patches)
 
-        sim = img_embeds @ mem_embeds.t() / self.temperature
+        img_embeds_bt = img_embeds.view(B, Tq, -1)
+        sel_logits = self.patch_scorer(img_embeds_bt).squeeze(-1)
+
+        K = min(self.k, Tq)
+        idx = sel_logits.topk(K, dim=-1).indices
+        w = torch.zeros_like(sel_logits).scatter_(1, idx, 1.0)
+
+        sim = (img_embeds @ mem_embeds.t()) / self.temperature
 
         cls = cls.repeat_interleave(Tm)
         cls_one_hot = F.one_hot(cls, num_classes=self.num_classes).float()
@@ -87,5 +109,5 @@ class Matcher(nn.Module):
         sim_per_class = sim @ cls_one_hot
         sim_per_class = sim_per_class.view(B, Tq, self.num_classes)
 
-        logits = sim_per_class.sum(dim=1)
+        logits = (sim_per_class * w.unsqueeze(-1)).sum(dim=1)
         return logits
