@@ -2,18 +2,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torchvision.models import resnet18
 from utils import gumbel_topk_st
 
 
 class PatchEncoder(nn.Module):
-    def __init__(self, embed_dim=256):
+    def __init__(self, backbone, embed_dim=256):
         super().__init__()
 
-        base = resnet18(weights=None)
+        base = backbone
         self.cnn = nn.Sequential(*list(base.children())[:-1])
 
-        self.proj = nn.Linear(512, embed_dim)
+        self.proj = nn.LazyLinear(embed_dim)
 
     def forward(self, patches):
         feats = self.cnn(patches)
@@ -25,11 +24,11 @@ class PatchEncoder(nn.Module):
         
         
 class Matcher(nn.Module):
-    def __init__(self, num_classes, extractor, k=8, tau_gumbel=1.0, embed_dim=256, temperature=0.1):
+    def __init__(self, num_classes, extractor, backbone, k=8, tau_gumbel=1.0, embed_dim=256, temperature=0.1):
         super().__init__()
         self.num_classes = num_classes
         self.extractor = extractor
-        self.encoder = PatchEncoder(embed_dim)
+        self.encoder = PatchEncoder(backbone, embed_dim)
         self.temperature = temperature
 
         self.k = k

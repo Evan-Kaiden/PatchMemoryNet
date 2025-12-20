@@ -35,7 +35,8 @@ def train_one_epoch(epoch : int, model : nn.Module, trainloader : DataLoader, op
             optimizer.step()
 
             pbar.update(1)
-        scheduler.step(total_loss / total)
+        if scheduler is not None:
+            scheduler.step(total_loss / total)
 
 
 def test(epoch: int, model : nn.Module, testloader : DataLoader, memloader : DataLoader, criterion, device=None):
