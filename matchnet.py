@@ -39,6 +39,11 @@ class Matcher(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(128, 1)
         )
+
+        for m in self.patch_scorer.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.zeros_(m.weight)
+                nn.init.zeros_(m.bias)
         
     def encode_patches(self, x):
         patches = self.extractor(x)
@@ -67,12 +72,12 @@ class Matcher(nn.Module):
         sim = sim - torch.eye(N, device=sim.device) * 1e9
 
         cls_one_hot = F.one_hot(y_patches, num_classes=self.num_classes).float()
-        sim_per_class = sim @ cls_one_hot                         # (N, C)
+        sim_per_class = sim @ cls_one_hot
 
-        w_flat = w.reshape(N)                                     # (N,)
-        logits = sim_per_class * w_flat.unsqueeze(1)              # (N, C)
+        w_flat = w.reshape(N)
+        logits = sim_per_class * w_flat.unsqueeze(1)
 
-        targets = y_patches                                       # (N,)
+        targets = y_patches
         return logits, targets
 
     def forward(self, x, y=None):
