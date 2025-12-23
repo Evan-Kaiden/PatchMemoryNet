@@ -1,0 +1,17 @@
+{
+  "backbone": "resnet18",
+  "patch_size": 18,
+  "stride": 3,
+  "optimizer": "adam",
+  "lr": 0.001,
+  "lr_scheduler": "cosine",
+  "epochs": 100,
+  "continue_train": false,
+  "run_dir": "runs/20251223_102259",
+  "device": "cuda",
+  "num_classes": 10,
+  "epoch": 0,
+  "optimizer_class": "Adam",
+  "scheduler": "cosine",
+  "backbone_class": "ResNet"
+}
