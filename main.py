@@ -9,16 +9,12 @@ from sim_classifier import sim_classify
 from dataloader import trainloader, testloader, memloader
 
 import argparse
+import utils
 from mapping import map_arg
 
 import os
 import json
 from datetime import datetime
-
-run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-run_dir = os.path.join("runs", run_id)
-os.makedirs(run_dir, exist_ok=True)
-
 
 parser = argparse.ArgumentParser()
 
@@ -32,7 +28,8 @@ parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'r
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--lr_scheduler', type=str, default='none', choices=['cosine', 'linear', 'step', 'none'])
 parser.add_argument('--epochs', type=int, default=100)
-
+parser.add_argument('--continue_train', type=bool, default=False)
+parser.add_argument('--run_dir', type=str)
 args = parser.parse_args()
 
 def extractor(img):
@@ -46,43 +43,43 @@ elif torch.mps.is_available():
 
 print("device: ", device)
 
+if args.run_dir is None:
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = os.path.join("runs", run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    args.run_dir = run_dir
+
 backbone = map_arg[args.backbone]
 m = Matcher(10, extractor, backbone).to(device)
 opt = map_arg[args.optimizer](m.parameters(), lr=args.lr)
 criterion = torch.nn.CrossEntropyLoss()
-
-scheduler = args.lr_scheduler
-if scheduler == "cosine":
-    scheduler = map_arg[scheduler](optimizer=opt, T_max=args.epochs, eta_min=(args.lr / 100))
-elif scheduler == "linear":
-    scheduler = map_arg[scheduler](optimizer=opt, total_iters=args.epochs, start_factor=1, end_factor=.75)
-elif scheduler == "step":
-    scheduler = map_arg[scheduler](optimizer=opt, step_size=max(1, args.epochs // 10), gamma=0.5)
-else:
-    scheduler = None
-
-train(epochs=args.epochs, model=m, trainloader=trainloader, 
-        testloader=testloader, memloader=memloader, optimizer=opt, 
-        criterion=criterion, scheduler=scheduler, device=device
-        )
+scheduler = utils.get_scheduler(map_arg, opt, args.lr_scheduler, args.epochs, args.lr)
 
 config = vars(args)
 
-config.update({
-    "device": device,
-    "num_classes": 10,
-    "optimizer_class": opt.__class__.__name__,
-    "scheduler": args.lr_scheduler,
-    "backbone_class": backbone.__class__.__name__,
-})
+start_epoch = 0
+if args.continue_train and os.path.exists(os.path.join(args.run_dir, "model.pth")):
+    checkpoint = torch.load(os.path.join(args.run_dir, "model.pth"), map_location=device)
+    config = checkpoint.get("config", config)
+    m.load_state_dict(checkpoint["model_state"])
+    opt.load_state_dict(checkpoint["optimizer_state"])
+    scheduler = utils.get_scheduler(map_arg, opt, config['lr_scheduler'], config['epochs'], config['lr'])
+    if "scheduler_state" in checkpoint and checkpoint["scheduler_state"] is not None:
+        scheduler.load_state_dict(checkpoint["scheduler_state"])
+    start_epoch = checkpoint.get("epoch", 0)
+else:
+    config.update({
+        "device": device,
+        "num_classes": 10,
+        "epoch": start_epoch,
+        "optimizer_class": opt.__class__.__name__,
+        "scheduler": args.lr_scheduler,
+        "backbone_class": backbone.__class__.__name__,
+    })
+    with open(os.path.join(args.run_dir, "config.json"), "w") as f:
+        json.dump(config, f, indent=2)
 
-with open(os.path.join(run_dir, "config.json"), "w") as f:
-    json.dump(config, f, indent=2)
-
-torch.save(
-    {
-        "model_state": m.state_dict(),
-        "config": config,
-    },
-    os.path.join(run_dir, "model.pth"),
-)
+train(epochs=args.epochs, model=m, trainloader=trainloader, 
+      testloader=testloader, memloader=memloader, optimizer=opt, 
+      criterion=criterion, scheduler=scheduler, config=config, 
+      start_epoch=start_epoch, device=device)

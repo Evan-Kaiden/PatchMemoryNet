@@ -55,3 +55,15 @@ def gumbel_topk_st(logits: torch.Tensor, k: int, tau: float):
     w_soft = F.softmax(logits / tau, dim=-1)                     # smooth probs
     weights = w_hard + (w_soft - w_soft.detach())                # straight-through
     return weights, idx
+
+def get_scheduler(map_arg, optimizer, scheduler, epochs, lr):
+    if scheduler == "cosine":
+        scheduler = map_arg[scheduler](optimizer=optimizer, T_max=epochs, eta_min=(lr / 100))
+    elif scheduler == "linear":
+        scheduler = map_arg[scheduler](optimizer=optimizer, total_iters=epochs, start_factor=1, end_factor=.75)
+    elif scheduler == "step":
+        scheduler = map_arg[scheduler](optimizer=optimizer, step_size=max(1, epochs // 10), gamma=0.5)
+    else:
+        scheduler = None
+    
+    return scheduler

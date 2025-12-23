@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -78,7 +80,17 @@ def test(epoch: int, model : nn.Module, testloader : DataLoader, memloader : Dat
 
     print(f"Epoch {epoch} | Loss {loss_total / total :.3f} | Accuracy {correct_total / total :.3f} ({correct_total}/{total})")
 
-def train(epochs : int, model : nn.Module, trainloader : DataLoader, testloader: DataLoader, memloader: DataLoader, optimizer : Optimizer, criterion, scheduler, device=None):
-    for epoch in range(epochs):
+def train(epochs : int, model : nn.Module, trainloader : DataLoader, testloader: DataLoader, memloader: DataLoader, optimizer : Optimizer, criterion, scheduler, config, start_epoch=0, device=None):  
+    for epoch in range(start_epoch, epochs):
         train_one_epoch(epoch, model, trainloader, optimizer, criterion, scheduler, device)
         test(epoch, model, testloader, memloader, criterion, device)
+
+        torch.save({
+                "epoch": epoch,
+                "model_state": model.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "scheduler_state": scheduler.state_dict(),
+                "config": config,
+                },
+            os.path.join(config["run_dir"], f"state.pth")
+            )
