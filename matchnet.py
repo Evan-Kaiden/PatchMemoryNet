@@ -24,7 +24,7 @@ class PatchEncoder(nn.Module):
         
         
 class Matcher(nn.Module):
-    def __init__(self, num_classes, extractor, backbone, k=8, tau_gumbel=1.0, embed_dim=256, temperature=0.1):
+    def __init__(self, num_classes, extractor, backbone, k=10, tau_gumbel=1.0, embed_dim=256, temperature=0.1):
         super().__init__()
         self.num_classes = num_classes
         self.extractor = extractor
@@ -39,10 +39,9 @@ class Matcher(nn.Module):
             nn.Linear(128, 1)
         )
 
-        for m in self.patch_scorer.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, std=1e-3)
-                nn.init.zeros_(m.bias)
+        m = list(self.patch_scorer.modules())[-1]
+        nn.init.zeros_(m.weight)
+        nn.init.zeros_(m.bias)
         
     def encode_patches(self, x):
         patches = self.extractor(x)
