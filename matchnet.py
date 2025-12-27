@@ -39,9 +39,10 @@ class Matcher(nn.Module):
             nn.Linear(128, 1)
         )
 
-        m = list(self.patch_scorer.modules())[-1]
-        nn.init.zeros_(m.weight)
-        nn.init.zeros_(m.bias)
+        for m in self.patch_scorer.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.zeros_(m.weight)
+                nn.init.zeros_(m.bias)
         
     def encode_patches(self, x):
         patches = self.extractor(x)
