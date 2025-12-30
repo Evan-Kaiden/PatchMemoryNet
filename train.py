@@ -53,8 +53,8 @@ def test(epoch: int, model : nn.Module, testloader : DataLoader, memloader : Dat
     with torch.no_grad():
         mem_iter = iter(memloader)
 
-        total = len(testloader)
-        pbar = tqdm(total=total, desc="Testing", leave=False)
+        total = 0
+        pbar = tqdm(total=len(testloader), desc="Testing", leave=False)
 
         with pbar:
             for images, targets in testloader:
@@ -80,15 +80,20 @@ def test(epoch: int, model : nn.Module, testloader : DataLoader, memloader : Dat
 
                 pbar.update(1)
 
-    print(f"Epoch {epoch} | Loss {loss_total / total :.3f} | Accuracy {correct_total / total :.3f} ({correct_total}/{total})")
+    acc = correct_total / total
+    loss = loss_total / total
+    print(f"Epoch {epoch} | Loss {loss:.3f} | Accuracy {acc:.3f} ({correct_total}/{total})")
+    return loss, acc
 
 def train(epochs : int, model : nn.Module, trainloader : DataLoader, testloader: DataLoader, memloader: DataLoader, optimizer : Optimizer, criterion, scheduler, config, start_epoch=0, device=None):  
     for epoch in range(start_epoch, epochs):
         train_one_epoch(epoch, model, trainloader, optimizer, criterion, scheduler, device)
-        test(epoch, model, testloader, memloader, criterion, device)
+        loss, acc = test(epoch, model, testloader, memloader, criterion, device)
 
         torch.save({
                 "epoch": epoch,
+                "test_loss" : loss,
+                "test_acc" : acc * 100,
                 "model_state": model.state_dict(),
                 "optimizer_state": optimizer.state_dict(),
                 "scheduler_state": scheduler.state_dict(),

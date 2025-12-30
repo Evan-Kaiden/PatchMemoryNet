@@ -33,19 +33,25 @@ class SupervisedContrastiveLoss(nn.Module):
         pos_counts = mask.sum(dim=1)
         valid = pos_counts > 0
         mean_log_prob_pos = torch.zeros_like(pos_counts, device=device)
-        mean_log_prob_pos[valid] = (mask[valid] * log_prob[valid]).sum(dim=1) / pos_counts[valid]
+        
 
-        loss = -mean_log_prob_pos[valid].mean()
+        # mean_log_prob_pos[valid] = (mask[valid] * log_prob[valid]).sum(dim=1) / pos_counts[valid]
+        # loss = -mean_log_prob_pos[valid].mean()
+        
+        # ===
+        valid_f = valid.float()  
 
+        numerator = (mask * log_prob).sum(dim=1)
+        denominator = pos_counts.clamp_min(1)
+
+        mean_log_prob_pos = numerator / denominator
+        mean_log_prob_pos = mean_log_prob_pos * valid_f
+
+        loss = -(mean_log_prob_pos * valid_f).sum() / valid_f.sum().clamp_min(1)
+        # === 
         return loss
     
 def gumbel_topk_st(logits: torch.Tensor, k: int, tau: float):
-    """
-    logits: (B, T)
-    returns:
-      weights: (B, T)  # k-hot forward, soft-grad backward
-      idx:     (B, k)
-    """
     g = -torch.log(-torch.log(torch.rand_like(logits)))
     y = logits + g
     idx = y.topk(k, dim=-1).indices
@@ -57,7 +63,7 @@ def gumbel_topk_st(logits: torch.Tensor, k: int, tau: float):
 
 def get_scheduler(map_arg, optimizer, scheduler, epochs, lr):
     if scheduler == "cosine":
-        scheduler = map_arg[scheduler](optimizer=optimizer, T_max=epochs, eta_min=(lr / 100))
+        scheduler = map_arg[scheduler](optimizer=optimizer, T_max=epochs, eta_min=(lr / 10))
     elif scheduler == "linear":
         scheduler = map_arg[scheduler](optimizer=optimizer, total_iters=epochs, start_factor=1, end_factor=.75)
     elif scheduler == "step":

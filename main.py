@@ -5,7 +5,6 @@ import torch
 from train import train
 from matchnet import Matcher
 from samplier import extract_patches
-from sim_classifier import sim_classify
 from dataloader import trainloader, testloader, memloader
 
 import argparse
@@ -61,6 +60,8 @@ start_epoch = 0
 if args.continue_train and os.path.exists(os.path.join(args.run_dir, "state.pth")):
     checkpoint = torch.load(os.path.join(args.run_dir, "state.pth"), map_location=device)
     config = checkpoint.get("config", config)
+    print(config)
+    print(f"Training From Checkpoint:\n    Epoch: {checkpoint.get("epoch", 0)}\n    Test Loss {checkpoint.get("test_loss", 0)}\n    Test Accuracy {checkpoint.get("test_acc", 0)}")
 
     backbone = map_arg[config["backbone"]]
     m = Matcher(10, extractor, backbone).to(device)
