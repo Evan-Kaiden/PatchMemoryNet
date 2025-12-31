@@ -47,6 +47,7 @@ if args.run_dir is None:
     run_dir = os.path.join("runs", run_id)
     os.makedirs(run_dir, exist_ok=True)
     args.run_dir = run_dir
+    print(f"saving to {args.run_dir}")
 
 backbone = map_arg[args.backbone]
 m = Matcher(10, extractor, backbone).to(device)
