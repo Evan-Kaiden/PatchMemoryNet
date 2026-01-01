@@ -43,7 +43,7 @@ class Matcher(nn.Module):
         l_1 = [*self.patch_scorer.children()][-1]
 
 
-        nn.init.zeros_(l_0.weight)
+        nn.init.normal_(l_0.weight, std=1e-3)
         nn.init.zeros_(l_0.bias)
         nn.init.normal_(l_1.weight, std=1e-3)
         nn.init.zeros_(l_1.bias)
