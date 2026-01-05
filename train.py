@@ -24,15 +24,18 @@ def train_one_epoch(epoch : int, model : nn.Module, trainloader : DataLoader, op
                 
             logits, targets, selection_pen = model(images, targets)   
 
-            sel_loss = (selection_pen * torch.log(selection_pen + 1e-8)).sum(dim=1).mean()
-            ce_loss = criterion(logits, targets)
-
-            patch_embeds, B, Tq = model.encode_patches(images)
+            patch_embeds, _, _ = model.encode_patches(images)
             patch_embeds = F.normalize(patch_embeds, dim=1)
 
-            contrast_loss = contrastive_loss(patch_embeds, targets)
+            ce_loss = criterion(logits, targets)
 
-            loss = ce_loss + 0.25 * contrast_loss + 0.01 * sel_loss
+            if model.base_train:
+                contrast_loss = contrastive_loss(patch_embeds, targets)
+                loss = ce_loss + 0.25 * contrast_loss
+            elif not model.base_train:
+                sel_loss = (selection_pen * torch.log(selection_pen + 1e-8)).sum(dim=1).mean()
+                loss = ce_loss + 0.1 * sel_loss
+
             total_loss += loss.item()
             
             loss.backward()
@@ -68,7 +71,6 @@ def test(epoch: int, model : nn.Module, testloader : DataLoader, memloader : Dat
 
                 mem_images, cls = mem_images.to(device), cls.to(device)
         
-
                 logits = model.predict(images, mem_images, cls)
 
                 loss = criterion(logits, targets)
@@ -85,19 +87,37 @@ def test(epoch: int, model : nn.Module, testloader : DataLoader, memloader : Dat
     print(f"Epoch {epoch} | Loss {loss:.3f} | Accuracy {acc:.3f} ({correct_total}/{total})")
     return loss, acc
 
-def train(epochs : int, model : nn.Module, trainloader : DataLoader, testloader: DataLoader, memloader: DataLoader, optimizer : Optimizer, criterion, scheduler, config, start_epoch=0, device=None):  
+def train(epochs : int, model : nn.Module, trainloader : DataLoader, testloader: DataLoader, memloader: DataLoader, optimizer : Optimizer, criterion, scheduler, checkpoint, config, start_epoch=0, device=None):  
+    mode = "base" if model.base_train else "selector"
+
     for epoch in range(start_epoch, epochs):
         train_one_epoch(epoch, model, trainloader, optimizer, criterion, scheduler, device)
         loss, acc = test(epoch, model, testloader, memloader, criterion, device)
 
-        torch.save({
-                "epoch": epoch,
-                "test_loss" : loss,
-                "test_acc" : acc * 100,
-                "model_state": model.state_dict(),
-                "optimizer_state": optimizer.state_dict(),
-                "scheduler_state": scheduler.state_dict() if scheduler is not None else None,
+        state_dict = scheduler.state_dict() if scheduler is not None else None
+        state = {
+                "last_mode": mode,
+                
+                "base_epoch": epoch + 1 if mode == "base" else checkpoint.get("base_epoch"),
+                "selector_epoch": epoch + 1 if mode == "selector" else checkpoint.get("selector_epoch"),
+                
+                "base_test_loss": loss if mode == "base" else checkpoint.get("base_test_loss"),
+                "selector_test_loss" : loss if mode == "selector" else checkpoint.get("selector_test_loss"),
+                
+                "base_test_acc" : acc * 100 if mode == "base" else checkpoint.get("base_test_acc"),
+                "selector_test_acc" : acc * 100 if mode == "selector" else checkpoint.get("selector_test_acc"),
+
+                "base_model_state": model.state_dict() if mode == "base" else checkpoint.get("base_model_state"),
+                "selector_model_state": model.state_dict() if mode == "selector" else checkpoint.get("selector_model_state"),
+
+                
+                "base_optimizer_state": optimizer.state_dict() if mode == "base" else checkpoint.get("base_optimizer_state"),
+                "selector_optimizer_state": optimizer.state_dict() if mode == "selector" else checkpoint.get("selector_optimizer_state"),
+
+                "base_scheduler_state": state_dict if mode == "base" else checkpoint.get("base_scheduler_state"),
+                "selector_scheduler_state": state_dict if mode == "selector" else checkpoint.get("selector_scheduler_state"),
+                
                 "config": config,
-                },
-            os.path.join(os.path.curdir, config["run_dir"], f"state.pth")
-            )
+                }
+        torch.save(state, os.path.join(os.path.curdir, config["run_dir"], f"state.pth"))
+        checkpoint = state

@@ -26,6 +26,7 @@ class PatchEncoder(nn.Module):
 class Matcher(nn.Module):
     def __init__(self, num_classes, extractor, backbone, k=10, tau_gumbel=1.0, embed_dim=256, temperature=0.1):
         super().__init__()
+        self.base_train = True
         self.num_classes = num_classes
         self.extractor = extractor
         self.encoder = PatchEncoder(backbone, embed_dim)
@@ -39,18 +40,23 @@ class Matcher(nn.Module):
             nn.Linear(128, 1)
         )
 
-        l_0 = [*self.patch_scorer.children()][0]
-        l_1 = [*self.patch_scorer.children()][-1]
+        for p in self.patch_scorer.parameters():
+            p.requires_grad = False
+            p.requires_grad = False
 
+    def scorer_train_mode(self):
+        self.base_train = False
 
-        nn.init.normal_(l_0.weight, std=1e-3)
-        nn.init.zeros_(l_0.bias)
-        nn.init.normal_(l_1.weight, std=1e-3)
-        nn.init.zeros_(l_1.bias)
-        # for m in self.patch_scorer.modules():
-        #     if isinstance(m, nn.Linear):
-        #         nn.init.zeros_(m.weight)
-        #         nn.init.zeros_(m.bias)
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+
+        for p in self.patch_scorer.parameters():
+            p.requires_grad = True
+
+        for m in self.patch_scorer.named_modules():
+            if isinstance(m, nn.Linear):
+                    nn.init.normal_(m.weight, std=1e-3)
+                    nn.init.zeros_(m.bias)
         
     def encode_patches(self, x):
         patches = self.extractor(x)
@@ -64,16 +70,7 @@ class Matcher(nn.Module):
         N = B * Tq
 
         patch_embeds_bt = patch_embeds.view(B, Tq, -1)
-        sel_logits = self.patch_scorer(patch_embeds_bt).squeeze(-1)
-        p = sel_logits.softmax(dim=-1)
-
-        K = min(self.k, Tq)
-        if self.training:
-            w, idx = gumbel_topk_st(sel_logits, k=K, tau=self.tau_gumbel)
-        else:
-            idx = sel_logits.topk(K, dim=-1).indices
-            w = torch.zeros_like(sel_logits).scatter_(1, idx, 1.0)
-
+        
         y_patches = y.repeat_interleave(Tq)
 
         sim = (patch_embeds @ patch_embeds.t()) / self.temperature
@@ -82,11 +79,26 @@ class Matcher(nn.Module):
         cls_one_hot = F.one_hot(y_patches, num_classes=self.num_classes).float()
         sim_per_class = sim @ cls_one_hot
 
-        w_flat = w.reshape(N)
-        logits = sim_per_class * w_flat.unsqueeze(1)
+        if self.base_train:
+            logits = sim_per_class
+            targets = y_patches
+            return logits, targets, None
+        
+        else:
+            sel_logits = self.patch_scorer(patch_embeds_bt).squeeze(-1)
+            p = sel_logits.softmax(dim=-1)
 
-        targets = y_patches
-        return logits, targets, p
+            K = min(self.k, Tq)
+            if self.training:
+                w, idx = gumbel_topk_st(sel_logits, k=K, tau=self.tau_gumbel)
+            else:
+                idx = sel_logits.topk(K, dim=-1).indices
+                w = torch.zeros_like(sel_logits).scatter_(1, idx, 1.0)
+
+            w_flat = w.reshape(N)
+            logits = sim_per_class * w_flat.unsqueeze(1)
+            targets = y_patches
+            return logits, targets, p
 
     def forward(self, x, y=None):
         if y is None:
