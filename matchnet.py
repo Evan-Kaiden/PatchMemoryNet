@@ -19,7 +19,7 @@ class PatchEncoder(nn.Module):
         feats = F.adaptive_avg_pool2d(feats, 1)
         feats = feats.view(feats.size(0), -1)
         embeds = self.proj(feats)
-        embeds = F.normalize(embeds, dim=1)
+        # embeds = F.normalize(embeds, dim=1)
         return embeds
         
         
@@ -64,46 +64,47 @@ class Matcher(nn.Module):
         patches = patches.reshape(B * Tq, C, H, W).contiguous()
         patch_embeds = self.encoder(patches)
         return patch_embeds, B, Tq
+    
 
-    def logits_from_batch_memory(self, x, y):
-        patch_embeds, B, Tq = self.encode_patches(x)
-        N = B * Tq
-
-        patch_embeds_bt = patch_embeds.view(B, Tq, -1)
+    def forward(self, x, y, examples, examples_labels):
+        query_patches = self.extractor(x)
+        B, Tq, C, H, W = query_patches.shape
+        query_patches = query_patches.reshape(B * Tq, C, H, W).contiguous()
+        query_embeds = self.encoder(query_patches)
         
-        y_patches = y.repeat_interleave(Tq)
-
-        sim = (patch_embeds @ patch_embeds.t()) / self.temperature
-        sim = sim - torch.eye(N, device=sim.device) * 1e9
-
-        cls_one_hot = F.one_hot(y_patches, num_classes=self.num_classes).float()
+        ex_patches = self.extractor(examples)
+        M, Tm, _, _, _ = ex_patches.shape
+        ex_patches = ex_patches.reshape(M * Tm, C, H, W).contiguous()
+        ex_embeds = self.encoder(ex_patches)
+        
+        sim = (query_embeds @ ex_embeds.t()) / self.temperature
+        
+        ex_labels_expanded = examples_labels.repeat_interleave(Tm)
+        cls_one_hot = F.one_hot(ex_labels_expanded, num_classes=self.num_classes).float()
         sim_per_class = sim @ cls_one_hot
-
-        if self.base_train:
-            logits = sim_per_class
-            targets = y_patches
-            return logits, targets, None
+        sim_per_class = sim_per_class.view(B, Tq, self.num_classes)
         
+        patch_targets = y.repeat_interleave(Tq)
+        
+        if self.base_train:
+            logits = sim_per_class.sum(dim=1)
+            patch_logits = sim_per_class
+            return logits, patch_logits, patch_targets, None
         else:
-            sel_logits = self.patch_scorer(patch_embeds_bt).squeeze(-1)
+            query_embeds_bt = query_embeds.view(B, Tq, -1)
+            sel_logits = self.patch_scorer(query_embeds_bt).squeeze(-1)
             p = sel_logits.softmax(dim=-1)
-
+            
             K = min(self.k, Tq)
             if self.training:
                 w, idx = gumbel_topk_st(sel_logits, k=K, tau=self.tau_gumbel)
             else:
                 idx = sel_logits.topk(K, dim=-1).indices
                 w = torch.zeros_like(sel_logits).scatter_(1, idx, 1.0)
-
-            w_flat = w.reshape(N)
-            logits = sim_per_class * w_flat.unsqueeze(1)
-            targets = y_patches
-            return logits, targets, p
-
-    def forward(self, x, y=None):
-        if y is None:
-            raise ValueError("For training this Matcher, call forward with x, y.")
-        return self.logits_from_batch_memory(x, y)
+            
+            logits = (sim_per_class * w.unsqueeze(-1)).sum(dim=1)
+            patch_logits = sim_per_class
+            return logits, patch_logits, patch_targets, p
 
     @torch.no_grad()
     def predict(self, x, memory, cls):
